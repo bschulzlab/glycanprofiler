@@ -43,11 +43,17 @@ class Sequence:
     def count(self, char, start, end):
         return self.seq.count(char, start, end)
 
+    def __repr__(self):
+        return self.seq
+
+    def __str__(self):
+        return self.seq
+
 
 class ProteinCollection:
     regex_motif = '(?=(N[^PX][ST]))'
 
-    def __init__(self, alignment_fn=None, multifasta_fn=None):
+    def __init__(self, alignment_fn=None, multifasta_fn=None, keeping=None):
         """
 
         :type multifasta_fn: str
@@ -57,6 +63,7 @@ class ProteinCollection:
         """
         self.alignment_fn = alignment_fn
         self.multifasta_fn = multifasta_fn
+        self.keeping = keeping
         self.motifs = []
         self.seqs = {}
         self.parse_motifs()
@@ -87,7 +94,12 @@ class ProteinCollection:
         else:
             seq = dict()
             for rec in SeqIO.parse(self.multifasta_fn, 'fasta'):
-                # print(rec)
+                #print(rec.id)
+                if self.keeping:
+                    if rec.id in self.keeping:
+                        pass
+                    else:
+                        continue
                 p = Sequence(str(rec.seq).upper(), metadata={'id': rec.id})
 
                 p.metadata['motifs'] = [match for match in p.find_with_regex(self.regex_motif, ignore=p.gaps())]
@@ -148,6 +160,7 @@ class Analyses:
             seq = r['Annotated Sequence']
             mod = r['Modifications']
             # print(i3)
+
             p = Sequence(seq.upper())
             ind += (row,)
             # print(p)
@@ -435,7 +448,7 @@ def analyze(b, cat, dfs, job_id, p, wdf, zf):
 def analyze2(df_map, work_df, p, query, job_id, zf):
     summaries = []
     for _, r in work_df.iterrows():
-        d = Analyses(df_map[r['filename']], r['filename'], r['protein'], p, '(?=(N[^PX][ST]))', zip_handler=zf,
+        d = Analyses(df_map[r['filename']][r['protein']], r['filename'], r['protein'], p, '(?=(N[^PX][ST]))', zip_handler=zf,
                      job_id=job_id)
         d.process()
         summary = d.compile(query['maxSites'], query['separate_h'], glycans=query['glycans'],

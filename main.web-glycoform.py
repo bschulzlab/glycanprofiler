@@ -21,6 +21,11 @@ class BaseHandler(web.RequestHandler):
         self.finish()
 
 
+class HomeHandler(BaseHandler):
+    def get(self):
+        self.render("index.html")
+
+
 class GlycanProfilerHandler(BaseHandler):
     def data_received(self, chunk):
         pass
@@ -31,7 +36,7 @@ class GlycanProfilerHandler(BaseHandler):
         dfs = dict()
         work_array = []
         job_id = uuid.uuid4().hex
-        serve_file = os.path.join(settingmain.APP_STATIC, job_id + '.zip')
+
         folder = os.path.join(settingmain.APP_TEMP, job_id)
         os.mkdir(folder)
         boil = escape.json_decode(self.request.files['boilerplate'][0].body)
@@ -44,32 +49,38 @@ class GlycanProfilerHandler(BaseHandler):
         with open(mf, 'wb') as multifasta:
             multifasta.write(self.request.files['fasta'][0].body)
         # mf = io.StringIO(self.request.files['fasta'][0].body.decode('UTF-8'))
-        p = ProteinCollection(alignment_fn=align, multifasta_fn=mf)
+        print("Loading protein collection.")
+        p = ProteinCollection(alignment_fn=align, multifasta_fn=mf, keeping={b["protein"] for b in boil})
         for i in self.request.files['files']:
             if i.filename not in dfs:
+                dfs[i.filename] = {}
                 if i.filename.endswith('.xlsx'):
                     for b in boil:
                         if i.filename in b['repsMap']:
                             df = pd.read_excel(io.BytesIO(i.body))
-                            print("Pre-processing: %s" % i.filename)
+                            print("Pre-processing: {} for {}".format(i.filename, b['protein']))
                             df = df[(df['Master Protein Accessions'].notnull()) & (
                                 df['Master Protein Accessions'].str.contains(b['protein'])) & (
                                         ~df['Area'].isnull()) & (df['Search Engine Rank'] == 1) & (
                                             df['Area'] >= b['minimumArea'])]
                             if len(df.index) > 0:
-                                dfs[i.filename] = df
+                                if b['protein'] not in dfs[i.filename]:
+                                    dfs[i.filename][b['protein']] = df
                                 work_array.append(
                                     [b['repsMap'][i.filename], b['condsMap'][i.filename], b['protein'], i.filename])
-                                break
+                                # break
         work_df = pd.DataFrame(work_array, columns=['replicate', 'condition', 'protein', 'filename'])
         print(p)
         print(work_df)
         output = []
         for b in boil:
+            # print(b)
             wdf = work_df[work_df['protein'] == b['protein']]
+            print(wdf)
             # cat = ["H", "D", "U"]
             # lrep = len(b['reps'])
             # lcat = len(cat)
+            serve_file = os.path.join(settingmain.APP_STATIC, '{}_{}.zip'.format(b['protein'], job_id))
             with zipfile.ZipFile(serve_file, 'w') as zf:
                 results = analyze2(dfs, wdf, p, b, job_id, zf)
                 for i, d in results.groupby(["condition"]):
@@ -108,7 +119,7 @@ class GlycanProfilerHandler(BaseHandler):
                 #     writer.save()
                 #     zf.write(os.path.join(folder, i + '.xlsx'), i + '.xlsx')
 
-            output.append(dict(protein=[b['protein']], filename=job_id + '.zip'))
+            output.append(dict(protein=[b['protein']], filename='{}_{}.zip'.format(b['protein'], job_id)))
         print("Finished.")
         self.write(dict(data=output))
 
@@ -116,12 +127,15 @@ class GlycanProfilerHandler(BaseHandler):
 settings = {
     "autoreload": True,
     "debug": True,
+    "template_path": os.path.join(settingmain.APP_STATIC, "template"),
+    "static_path": settingmain.APP_STATIC
 }
 
 if __name__ == "__main__":
     application = web.Application([
+        (r"/", HomeHandler),
         (r"/api/gpp/upload/", GlycanProfilerHandler),
-        (r"/static/(.*)", web.StaticFileHandler, {"path": "./static"}),
+        (r"/static/(.*)", web.StaticFileHandler, {"path": r"./static"}),
     ], **settings)
     application.listen(9001)
     ioloop.IOLoop.current().start()
